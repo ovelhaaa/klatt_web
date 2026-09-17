@@ -953,15 +953,32 @@ function App() {
                         reader.onload = (event) => {
                           try {
                             const data = JSON.parse(event.target?.result as string);
-                            if (data.steps && Array.isArray(data.steps)) {
-                              setRecordedSteps(data.steps);
-                              const customSeq: Sequence = {
-                                name: 'Imported',
-                                bpm: data.bpm || 120,
-                                steps: data.steps
-                              };
-                              sequencerRef.current.setSequence(customSeq);
-                            }
+                            
+                            // Validate data structure
+                            if (typeof data !== 'object' || data === null) return;
+                            if (!Array.isArray(data.steps) || data.steps.length === 0) return;
+                            if (typeof data.bpm !== 'number' || !isFinite(data.bpm) || data.bpm <= 0) return;
+                            
+                            // Validate each step
+                            const validSteps = data.steps.every((step: any) => {
+                              return step !== null &&
+                                     typeof step === 'object' &&
+                                     typeof step.consonant === 'number' && isFinite(step.consonant) &&
+                                     typeof step.vowel === 'number' && isFinite(step.vowel) &&
+                                     typeof step.velocity === 'number' && isFinite(step.velocity) &&
+                                     typeof step.duration === 'number' && isFinite(step.duration) && step.duration > 0;
+                            });
+                            
+                            if (!validSteps) return;
+                            
+                            // All validation passed
+                            setRecordedSteps(data.steps);
+                            const customSeq: Sequence = {
+                              name: 'Imported',
+                              bpm: data.bpm,
+                              steps: data.steps
+                            };
+                            sequencerRef.current.setSequence(customSeq);
                           } catch (err) {
                             console.error('Failed to import sequence:', err);
                           }

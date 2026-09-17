@@ -798,11 +798,12 @@ export class KlattEngine {
     this.attack = 0.05;
     this.release = 0.1;
     this.sustain = 1.0;
-    this.pResonFKnob = 500;
-    this.pResonBWKnob = 1000;
+    // Match UI scale: 17/100 * 3000 = 510, 20/100 * 5000 + 1 = 1001
+    this.pResonFKnob = 510;
+    this.pResonBWKnob = 1001;
     this.pResonWetKnob = 0;
-    this.pAResonFKnob = 500;
-    this.pAResonBWKnob = 1000;
+    this.pAResonFKnob = 510;
+    this.pAResonBWKnob = 1001;
     this.pAResonWetKnob = 0;
   }
 }

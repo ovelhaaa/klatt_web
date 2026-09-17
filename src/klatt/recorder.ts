@@ -28,10 +28,17 @@ export class Recorder {
     const now = Date.now();
     const duration = (now - this.lastStepTime) / (60000 / this.bpm); // Convert to beats
     
+    // Assign duration to the previous step if it exists
+    if (this.steps.length > 0) {
+      const prevStep = this.steps[this.steps.length - 1];
+      prevStep.duration = Math.max(0.25, Math.min(4, duration)); // Clamp between 0.25 and 4 beats
+    }
+    
+    // Add new step with default duration
     this.steps.push({
       consonant,
       vowel,
-      duration: Math.max(0.25, Math.min(4, duration)), // Clamp between 0.25 and 4 beats
+      duration: 0.25, // Default duration, will be updated by next step
       velocity
     });
 

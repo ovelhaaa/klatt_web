@@ -120,8 +120,19 @@ export class Sequencer {
   private onStepChange: ((step: number) => void) | null = null;
 
   setSequence(seq: Sequence) {
+    // Clear active timeout before changing sequence
+    if (this.timerId !== null) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
+    }
+    
     this.sequence = seq;
     this.currentStep = 0;
+    
+    // Restart scheduling if playing
+    if (this.isPlaying) {
+      this.scheduleNext();
+    }
   }
 
   setOnStep(callback: (step: SyllableStep) => void) {

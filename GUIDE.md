@@ -108,7 +108,7 @@ O gravador permite criar sequências personalizadas:
 ### Teclado do Computador
 ```
 A W S E D F T G Y H U J K O L P
-C4 D4 E4 F4 G4 A4 B4 C5 D5 E5 F5 G5 A5 C6 D6
+C4 D#4 E4 F4 G4 A4 A#4 B4 C5 D5 D#5 E5 F5 G5 G#5 A5
 ```
 
 ### Piano Virtual
@@ -233,9 +233,10 @@ npm run preview  # Preview do build
 ### Modelo de Klatt
 - Fonte glotal: Onda pulse com waveshaping
 - Fonte de ruído: Gerador pseudo-aleatório
-- Trilha em cascata: 5 ressonadores + 1 antirressonador
+- Filtros preliminares: 4 filtros (RGP, RGZ, RGS, LPF)
+- Trilha em cascata: 6 ressonadores + 1 antirressonador
 - Trilha paralela: 5 filtros ressonadores
-- Total: 16 filtros (ressonadores + antirressonadores)
+- Total: 16 filtros (4 preliminares + 7 cascata + 5 paralelos)
 
 ### Otimizações
 - Tabelas de lookup para seno e MIDI
