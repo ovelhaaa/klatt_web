@@ -16,12 +16,13 @@ export function createMtoIncTable(sampleRate: number): Float32Array {
   return table;
 }
 
-// Pitch bend table (1024 entries, centered at 8192 = no bend)
+// Pitch bend table (1024 entries, centered at index 512 = no bend)
+// Maps pitchbend >> 4 (0-1023) to frequency multiplier
 export function createPitchBendTable(): Float32Array {
-  const table = new Float32Array(16384);
-  for (let i = 0; i < 16384; i++) {
-    // 2 semitones range, centered at 8192
-    const semitones = (i - 8192) / 8192 * 2;
+  const table = new Float32Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    // 2 semitones range, centered at index 512 (pitchbend 8192)
+    const semitones = (i - 512) / 512 * 2;
     table[i] = Math.pow(2, semitones / 12);
   }
   return table;

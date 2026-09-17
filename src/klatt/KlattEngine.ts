@@ -19,6 +19,11 @@ export class KlattEngine {
   private pitchbendTable: Float32Array;
   private wavetable: Float32Array;
 
+  // expfFast buffers (reused to avoid allocations)
+  private expfBuf: ArrayBuffer;
+  private expfFView: Float32Array;
+  private expfIView: Int32Array;
+
   // Voices
   private voices: SynthVoice[];
   private keyboard: Int32Array;
@@ -105,6 +110,11 @@ export class KlattEngine {
     this.pitchbendTable = createPitchBendTable();
     this.wavetable = new Float32Array(TABLE_SIZE);
 
+    // Initialize expfFast buffers once
+    this.expfBuf = new ArrayBuffer(4);
+    this.expfFView = new Float32Array(this.expfBuf);
+    this.expfIView = new Int32Array(this.expfBuf);
+
     this.voices = [];
     this.keyboard = new Int32Array(128);
     this.formantParams = [];
@@ -170,12 +180,9 @@ export class KlattEngine {
 
   // Fast exp approximation (Schraudolph's method)
   private expfFast(a: number): number {
-    const buf = new ArrayBuffer(4);
-    const fView = new Float32Array(buf);
-    const iView = new Int32Array(buf);
     const x = Math.round(12102203 * a + 1064866805);
-    iView[0] = x;
-    return fView[0];
+    this.expfIView[0] = x;
+    return this.expfFView[0];
   }
 
   // Taylor series sine approximation
@@ -201,10 +208,10 @@ export class KlattEngine {
     return this.wavetable[idx0] * (1.0 - frac) + this.wavetable[idx1] * frac;
   }
 
-  // Random float [-1, 1]
+  // Random float [-1, 1)
   private randf(): number {
     this.randNext = (this.randNext * 196314165 + 907633515) | 0;
-    return this.randNext * 0.0000000004656612873077392578125 - 1.0;
+    return this.randNext * 0.0000000004656612873077392578125;
   }
 
   // Resonator filter
@@ -258,6 +265,7 @@ export class KlattEngine {
   }
 
   private enqueueDelInterp(param: FormantParam, delay: number, value: number, duration: number) {
+    if (this.delQueueSize >= DEL_QUEUE_CAP) return;
     this.delQueueRear = (this.delQueueRear + 1) % DEL_QUEUE_CAP;
     let curr = this.delQueueRear;
     let prior = curr === 0 ? DEL_QUEUE_CAP - 1 : curr - 1;
@@ -379,6 +387,7 @@ export class KlattEngine {
       } else if (note >= 36 && note <= 42) {
         this.cvKeyboard ^= 1 << (42 - note);
       } else if (note === 43) {
+        if (this.cvQueueSize >= CV_QUEUE_CAP) return;
         this.cvQueueRear = (this.cvQueueRear === CV_QUEUE_CAP - 1) ? 0 : this.cvQueueRear + 1;
         this.cvQueue[this.cvQueueRear] = this.cvKeyboard;
         this.cvKeyboard = 0;
@@ -678,21 +687,17 @@ export class KlattEngine {
   // Direct phoneme trigger for UI
   triggerPhoneme(consonant: number, vowel: number) {
     const cv = (consonant << 3) | vowel;
+    if (this.cvQueueSize >= CV_QUEUE_CAP) return;
     this.cvQueueRear = (this.cvQueueRear === CV_QUEUE_CAP - 1) ? 0 : this.cvQueueRear + 1;
     this.cvQueue[this.cvQueueRear] = cv;
     this.cvQueueSize++;
 
-    // Trigger a note to play the phoneme
+    // Process the phoneme directly (no voice accounting)
     if (this.voiceMode === VoicingMode.MONOVOICE) {
-      const note = 60; // Middle C
-      this.voiceSum += note;
-      this.voiceCount++;
-      if (this.voiceCount === 1 && this.voiceResting(0.05)) {
-        this.interpSet(this.formantParams[FormantParam.F0], note);
+      // Set default F0 and A0 if not already set
+      if (this.voiceResting(0.05)) {
+        this.interpSet(this.formantParams[FormantParam.F0], 60);
         this.interpSet(this.formantParams[FormantParam.A0], 100);
-      } else {
-        this.interp(this.formantParams[FormantParam.F0], this.voiceSum / this.voiceCount, -1);
-        this.interp(this.formantParams[FormantParam.A0], 100, -1);
       }
 
       let currCV: number;

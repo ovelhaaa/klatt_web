@@ -14,6 +14,7 @@ function App() {
   const engineRef = useRef<KlattEngine | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number>(0);
+  const frameCountRef = useRef<number>(0);
   const [isStarted, setIsStarted] = useState(false);
   const [mode, setMode] = useState<VoicingMode>(VoicingMode.POLYVOICE);
   const [masterVol, setMasterVol] = useState(80);
@@ -170,9 +171,12 @@ function App() {
         ctx.stroke();
       }
 
-      // Update formant display
-      const fv = engine.getFormantValues();
-      setFormantValues(fv);
+      // Update formant display (throttled to ~6 updates/sec)
+      frameCountRef.current++;
+      if (frameCountRef.current % 10 === 0) {
+        const fv = engine.getFormantValues();
+        setFormantValues(fv);
+      }
 
       animFrameRef.current = requestAnimationFrame(draw);
     };
@@ -364,7 +368,7 @@ function App() {
     { cons: ConsonantCode.CODE_H, vowel: VowelCode.CODE_A, label: 'ha' },
   ];
 
-  // Piano keys (2 octaves starting at C4)
+  // Piano keys (2 octaves starting at C3)
   const pianoKeys: { note: number; isBlack: boolean; name: string }[] = [];
   for (let i = 48; i < 72; i++) {
     const isBlack = [1, 3, 6, 8, 10].includes(i % 12);
@@ -610,8 +614,8 @@ function App() {
           <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
             <h3 className="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">Keyboard</h3>
             <div className="text-xs text-gray-400 space-y-1">
-              <p><span className="text-green-400 font-mono">A W S E D F T G Y H U J K</span></p>
-              <p className="text-gray-500">C4 through C6 (chromatic)</p>
+              <p><span className="text-green-400 font-mono">A W S E D F T G Y H U J K O L P</span></p>
+              <p className="text-gray-500">C4 through D#5 (chromatic)</p>
               <p className="mt-2"><span className="text-blue-400">MIDI:</span> Connect a controller for full control</p>
             </div>
           </div>
