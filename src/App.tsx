@@ -2,6 +2,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { KlattEngine } from './klatt/KlattEngine';
 import { VoicingMode } from './klatt/types';
 import { ConsonantCode, VowelCode } from './klatt/types';
+import { presets, type SynthPreset } from './klatt/presets';
+import { Sequencer, sequences, type Sequence, type SyllableStep } from './klatt/sequencer';
+import { Recorder } from './klatt/recorder';
 
 // Note names for keyboard
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -32,8 +35,20 @@ function App() {
   const [activeNotes, setActiveNotes] = useState<Set<number>>(new Set());
   const [selectedConsonant, setSelectedConsonant] = useState<number>(0);
   const [selectedVowel, setSelectedVowel] = useState<number>(4); // A
-  const [formantValues, setFormantValues] = useState({ F1: 0, F2: 0, F3: 0, AV: 0 });
+  const [formantValues, setFormantValues] = useState({
+    F0: 0, F1: 0, F2: 0, F3: 0, F4: 0, F5: 0,
+    FNP: 0, FNZ: 0, B1: 0, B2: 0, B3: 0,
+    AV: 0, AVS: 0, AF: 0, AH: 0, A0: 0
+  });
   const [midiConnected, setMidiConnected] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState<string>('');
+  const sequencerRef = useRef<Sequencer>(new Sequencer());
+  const [seqPlaying, setSeqPlaying] = useState(false);
+  const [selectedSequence, setSelectedSequence] = useState<number>(0);
+  const [currentSeqStep, setCurrentSeqStep] = useState<number>(-1);
+  const recorderRef = useRef<Recorder>(new Recorder());
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedSteps, setRecordedSteps] = useState<SyllableStep[]>([]);
   const modeRef = useRef(mode);
   const selectedConsonantRef = useRef(selectedConsonant);
   const selectedVowelRef = useRef(selectedVowel);
@@ -45,8 +60,29 @@ function App() {
   // Initialize engine
   useEffect(() => {
     engineRef.current = new KlattEngine();
+    
+    // Setup sequencer
+    const seq = sequencerRef.current;
+    seq.setSequence(sequences[0]);
+    seq.setOnStep((step: SyllableStep) => {
+      if (!engineRef.current) return;
+      if (step.velocity > 0) {
+        engineRef.current.triggerPhoneme(step.consonant, step.vowel);
+        engineRef.current.noteOn(60, step.velocity);
+        setTimeout(() => {
+          if (engineRef.current) {
+            engineRef.current.noteOff(60);
+          }
+        }, 150);
+      }
+    });
+    seq.setOnStepChange((step: number) => {
+      setCurrentSeqStep(step);
+    });
+    
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      seq.stop();
     };
   }, []);
 
@@ -297,6 +333,11 @@ function App() {
       // In formant mode, trigger the selected CV pair
       engineRef.current.triggerPhoneme(selectedConsonant, selectedVowel);
       engineRef.current.noteOn(note, 100);
+      
+      // Record if recording
+      if (isRecording) {
+        recorderRef.current.recordStep(selectedConsonant, selectedVowel, 100);
+      }
     } else {
       engineRef.current.noteOn(note, 100);
     }
@@ -322,6 +363,12 @@ function App() {
     const note = 60;
     engineRef.current.noteOn(note, 100);
     setActiveNotes(prev => new Set(prev).add(note));
+    
+    // Record if recording
+    if (isRecording) {
+      recorderRef.current.recordStep(selectedConsonant, selectedVowel, 100);
+    }
+    
     // Release after a short time
     setTimeout(() => {
       if (engineRef.current) {
@@ -333,6 +380,30 @@ function App() {
         });
       }
     }, 200);
+  };
+
+  // Apply preset
+  const applyPreset = (presetName: string) => {
+    if (!engineRef.current) return;
+    const preset = presets.find(p => p.name === presetName);
+    if (!preset) return;
+    
+    engineRef.current.applyPreset(preset.params);
+    setSelectedPreset(presetName);
+    
+    // Update UI controls to match preset
+    if (preset.params.masterVolume !== undefined) setMasterVol(preset.params.masterVolume);
+    if (preset.params.waveshape !== undefined) setWaveshape(preset.params.waveshape);
+    if (preset.params.flutter !== undefined) setFlutter(preset.params.flutter);
+    if (preset.params.attack !== undefined) setAttack(preset.params.attack);
+    if (preset.params.release !== undefined) setRelease(preset.params.release);
+    if (preset.params.sustain !== undefined) setSustain(preset.params.sustain);
+    if (preset.params.resonFreq !== undefined) setResonFreq(preset.params.resonFreq);
+    if (preset.params.resonBW !== undefined) setResonBW(preset.params.resonBW);
+    if (preset.params.resonWet !== undefined) setResonWet(preset.params.resonWet);
+    if (preset.params.antiResonFreq !== undefined) setAntiResonFreq(preset.params.antiResonFreq);
+    if (preset.params.antiResonBW !== undefined) setAntiResonBW(preset.params.antiResonBW);
+    if (preset.params.antiResonWet !== undefined) setAntiResonWet(preset.params.antiResonWet);
   };
 
   // Consonants and vowels for UI
@@ -436,6 +507,11 @@ function App() {
               🎹 MIDI Connected
             </span>
           )}
+          {isRecording && (
+            <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded animate-pulse">
+              ⏺ Recording
+            </span>
+          )}
           <button
             onClick={() => setMode(mode === VoicingMode.POLYVOICE ? VoicingMode.MONOVOICE : VoicingMode.POLYVOICE)}
             className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${
@@ -446,6 +522,33 @@ function App() {
           >
             {mode === VoicingMode.POLYVOICE ? '🎹 Poly Synth' : '🗣️ Formant Synth'}
           </button>
+        </div>
+      </div>
+
+      {/* Presets Bar */}
+      <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50 mb-4">
+        <div className="flex items-center gap-4">
+          <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wider whitespace-nowrap">Presets</h3>
+          <div className="flex flex-wrap gap-2 flex-1">
+            {presets.map(preset => (
+              <button
+                key={preset.name}
+                onClick={() => applyPreset(preset.name)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  selectedPreset === preset.name
+                    ? 'bg-gradient-to-r from-green-500 to-cyan-500 text-white shadow-lg'
+                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600/50 hover:text-white'
+                }`}
+                title={preset.description}
+              >
+                <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${
+                  preset.category === 'speech' ? 'bg-purple-400' :
+                  preset.category === 'synth' ? 'bg-blue-400' : 'bg-orange-400'
+                }`}></span>
+                {preset.name}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -507,14 +610,50 @@ function App() {
             />
           </div>
 
+          {/* Formant Spectrum Visualization */}
+          <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
+            <h3 className="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">Spectrum</h3>
+            <FormantSpectrum formantValues={formantValues} />
+          </div>
+
           {/* Formant Display */}
           <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
             <h3 className="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">Formant Monitor</h3>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <FormantBar label="F1" value={formantValues.F1} max={1500} color="#ff6b6b" />
-              <FormantBar label="F2" value={formantValues.F2} max={3500} color="#4ecdc4" />
-              <FormantBar label="F3" value={formantValues.F3} max={4500} color="#45b7d1" />
-              <FormantBar label="AV" value={formantValues.AV * 100} max={100} color="#96ceb4" />
+            <div className="space-y-3">
+              {/* Frequencies */}
+              <div>
+                <div className="text-[10px] text-gray-500 mb-1 uppercase">Frequencies (Hz)</div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <FormantBar label="F0" value={formantValues.F0} max={127} color="#ffd93d" />
+                  <FormantBar label="F1" value={formantValues.F1} max={1500} color="#ff6b6b" />
+                  <FormantBar label="F2" value={formantValues.F2} max={3500} color="#4ecdc4" />
+                  <FormantBar label="F3" value={formantValues.F3} max={4500} color="#45b7d1" />
+                  <FormantBar label="F4" value={formantValues.F4} max={5000} color="#6c5ce7" />
+                  <FormantBar label="F5" value={formantValues.F5} max={5000} color="#a29bfe" />
+                </div>
+              </div>
+              
+              {/* Bandwidths */}
+              <div>
+                <div className="text-[10px] text-gray-500 mb-1 uppercase">Bandwidths (Hz)</div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <FormantBar label="B1" value={formantValues.B1} max={500} color="#ff6b6b" />
+                  <FormantBar label="B2" value={formantValues.B2} max={500} color="#4ecdc4" />
+                  <FormantBar label="B3" value={formantValues.B3} max={500} color="#45b7d1" />
+                </div>
+              </div>
+              
+              {/* Amplitudes */}
+              <div>
+                <div className="text-[10px] text-gray-500 mb-1 uppercase">Amplitudes</div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <FormantBar label="AV" value={formantValues.AV * 100} max={100} color="#96ceb4" />
+                  <FormantBar label="AVS" value={formantValues.AVS * 100} max={100} color="#88d8b0" />
+                  <FormantBar label="AF" value={formantValues.AF * 100} max={100} color="#ff8b94" />
+                  <FormantBar label="AH" value={formantValues.AH * 100} max={100} color="#ffd3b6" />
+                  <FormantBar label="A0" value={formantValues.A0} max={200} color="#a8e6cf" />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -653,6 +792,190 @@ function App() {
             </div>
           </div>
 
+          {/* Sequencer */}
+          <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
+            <h3 className="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">Sequencer</h3>
+            
+            {/* Sequence selector */}
+            <div className="mb-3">
+              <label className="text-xs text-gray-400 mb-1 block">Pattern</label>
+              <select
+                value={selectedSequence}
+                onChange={(e) => {
+                  const idx = Number(e.target.value);
+                  setSelectedSequence(idx);
+                  sequencerRef.current.setSequence(sequences[idx]);
+                }}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-2 py-1.5 text-xs text-gray-300"
+              >
+                {sequences.map((seq, idx) => (
+                  <option key={idx} value={idx}>{seq.name} ({seq.bpm} BPM)</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Step visualization */}
+            <div className="mb-3">
+              <div className="flex gap-0.5 flex-wrap">
+                {sequences[selectedSequence].steps.map((step, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex-1 min-w-[20px] h-6 rounded transition-all ${
+                      currentSeqStep === idx
+                        ? 'bg-green-500 shadow-lg shadow-green-500/50'
+                        : step.velocity > 0
+                          ? 'bg-gray-600'
+                          : 'bg-gray-800'
+                    }`}
+                    title={`${step.consonant === 0 ? '∅' : String.fromCharCode(64 + step.consonant)}${String.fromCharCode(64 + step.vowel)}`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Play/Stop button */}
+            <button
+              onClick={() => {
+                if (seqPlaying) {
+                  sequencerRef.current.stop();
+                  setSeqPlaying(false);
+                } else {
+                  sequencerRef.current.setSequence(sequences[selectedSequence]);
+                  sequencerRef.current.start();
+                  setSeqPlaying(true);
+                }
+              }}
+              className={`w-full py-2 rounded-lg font-bold text-sm transition-all ${
+                seqPlaying
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30'
+                  : 'bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30'
+              }`}
+            >
+              {seqPlaying ? '⏹ Stop' : '▶ Play Pattern'}
+            </button>
+
+            {/* Record button */}
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={() => {
+                  if (isRecording) {
+                    const steps = recorderRef.current.stopRecording();
+                    setRecordedSteps(steps);
+                    setIsRecording(false);
+                  } else {
+                    recorderRef.current.startRecording(120);
+                    setIsRecording(true);
+                    setRecordedSteps([]);
+                  }
+                }}
+                className={`flex-1 py-1.5 rounded-lg font-bold text-xs transition-all ${
+                  isRecording
+                    ? 'bg-red-500 text-white animate-pulse shadow-lg shadow-red-500/50'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {isRecording ? '⏹ Stop Rec' : '⏺ Record'}
+              </button>
+              {recordedSteps.length > 0 && (
+                <>
+                  <button
+                    onClick={() => {
+                      // Create a custom sequence from recorded steps
+                      const customSeq: Sequence = {
+                        name: 'Custom',
+                        bpm: 120,
+                        steps: recordedSteps
+                      };
+                      sequencerRef.current.setSequence(customSeq);
+                      sequencerRef.current.start();
+                      setSeqPlaying(true);
+                    }}
+                    className="flex-1 py-1.5 bg-blue-500/20 text-blue-400 border border-blue-500/50 rounded-lg font-bold text-xs hover:bg-blue-500/30 transition-all"
+                  >
+                    ▶ Play Rec
+                  </button>
+                  <button
+                    onClick={() => setRecordedSteps([])}
+                    className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs text-gray-300 transition-all"
+                    title="Clear recorded steps"
+                  >
+                    🗑️
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Recorded steps display */}
+            {recordedSteps.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[10px] text-gray-500 mb-1">Recorded: {recordedSteps.length} steps</div>
+                <div className="flex gap-0.5 flex-wrap mb-2">
+                  {recordedSteps.map((step, idx) => (
+                    <div
+                      key={idx}
+                      className="px-1.5 py-0.5 bg-gray-700 rounded text-[9px] text-gray-300"
+                    >
+                      {step.consonant === 0 ? '∅' : String.fromCharCode(64 + step.consonant)}
+                      {String.fromCharCode(64 + step.vowel)}
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Export/Import buttons */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      const data = JSON.stringify({
+                        bpm: 120,
+                        steps: recordedSteps
+                      }, null, 2);
+                      const blob = new Blob([data], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = 'klatt-sequence.json';
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="flex-1 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[10px] text-gray-300 transition-all"
+                  >
+                    💾 Export
+                  </button>
+                  <label className="flex-1 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[10px] text-gray-300 text-center cursor-pointer transition-all">
+                    📂 Import
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          try {
+                            const data = JSON.parse(event.target?.result as string);
+                            if (data.steps && Array.isArray(data.steps)) {
+                              setRecordedSteps(data.steps);
+                              const customSeq: Sequence = {
+                                name: 'Imported',
+                                bpm: data.bpm || 120,
+                                steps: data.steps
+                              };
+                              sequencerRef.current.setSequence(customSeq);
+                            }
+                          } catch (err) {
+                            console.error('Failed to import sequence:', err);
+                          }
+                        };
+                        reader.readAsText(file);
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* About */}
           <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
             <h3 className="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">About</h3>
@@ -667,8 +990,42 @@ function App() {
               <p>
                 <span className="text-purple-400">Formant Mode:</span> Speech synthesis with consonant-vowel combinations
               </p>
+              {selectedPreset && (
+                <div className="mt-3 p-2 bg-gray-700/30 rounded-lg">
+                  <div className="text-[10px] text-gray-500 uppercase mb-1">Active Preset</div>
+                  <div className="text-green-400 font-medium">{selectedPreset}</div>
+                  <div className="text-gray-400 text-[10px] mt-1">
+                    {presets.find(p => p.name === selectedPreset)?.description}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Reset Button */}
+          <button
+            onClick={() => {
+              if (engineRef.current) {
+                engineRef.current.reset();
+                setMasterVol(80);
+                setWaveshape(90);
+                setFlutter(10);
+                setAttack(50);
+                setRelease(100);
+                setSustain(100);
+                setResonFreq(17);
+                setResonBW(20);
+                setResonWet(0);
+                setAntiResonFreq(17);
+                setAntiResonBW(20);
+                setAntiResonWet(0);
+                setSelectedPreset('');
+              }
+            }}
+            className="w-full py-2 bg-gray-700/50 hover:bg-gray-600/50 rounded-lg text-sm font-medium text-gray-300 transition-all"
+          >
+            🔄 Reset to Defaults
+          </button>
         </div>
       </div>
 
@@ -779,20 +1136,102 @@ function FormantBar({ label, value, max, color }: {
   max: number;
   color: string;
 }) {
-  const percent = Math.min(100, (value / max) * 100);
+  const percent = Math.min(100, Math.max(0, (value / max) * 100));
   return (
     <div className="flex items-center gap-2">
-      <span className="w-6 text-gray-400 font-mono">{label}</span>
-      <div className="flex-1 h-3 bg-gray-700 rounded-full overflow-hidden">
+      <span className="w-7 text-gray-400 font-mono text-[10px]">{label}</span>
+      <div className="flex-1 h-2.5 bg-gray-700/50 rounded-full overflow-hidden relative">
         <div
-          className="h-full rounded-full transition-all duration-100"
-          style={{ width: `${percent}%`, backgroundColor: color }}
+          className="h-full rounded-full transition-all duration-75 ease-out"
+          style={{ 
+            width: `${percent}%`, 
+            backgroundColor: color,
+            boxShadow: `0 0 8px ${color}40`
+          }}
         />
       </div>
-      <span className="w-12 text-right text-gray-400 font-mono text-[10px]">
-        {value.toFixed(0)}
+      <span className="w-10 text-right text-gray-400 font-mono text-[10px] tabular-nums">
+        {value < 10 ? value.toFixed(2) : value.toFixed(0)}
       </span>
     </div>
+  );
+}
+
+// Formant Spectrum Visualization Component
+function FormantSpectrum({ formantValues }: { 
+  formantValues: { F0: number; F1: number; F2: number; F3: number; F4: number; F5: number } 
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    // Clear canvas
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Draw frequency scale (0-5000 Hz)
+    ctx.strokeStyle = '#1a1a3a';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 5; i++) {
+      const x = (i / 5) * width;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+      ctx.stroke();
+      
+      // Frequency labels
+      ctx.fillStyle = '#4a4a6a';
+      ctx.font = '9px monospace';
+      ctx.fillText(`${i * 1000}`, x + 2, height - 2);
+    }
+    
+    // Draw formant peaks
+    const formants = [
+      { freq: formantValues.F1, color: '#ff6b6b', label: 'F1' },
+      { freq: formantValues.F2, color: '#4ecdc4', label: 'F2' },
+      { freq: formantValues.F3, color: '#45b7d1', label: 'F3' },
+      { freq: formantValues.F4, color: '#6c5ce7', label: 'F4' },
+      { freq: formantValues.F5, color: '#a29bfe', label: 'F5' },
+    ];
+    
+    formants.forEach(f => {
+      if (f.freq > 0 && f.freq < 5000) {
+        const x = (f.freq / 5000) * width;
+        
+        // Draw peak
+        const gradient = ctx.createLinearGradient(x, height, x, 0);
+        gradient.addColorStop(0, f.color + '00');
+        gradient.addColorStop(0.5, f.color + '80');
+        gradient.addColorStop(1, f.color + 'ff');
+        
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.ellipse(x, height * 0.7, 15, height * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw label
+        ctx.fillStyle = f.color;
+        ctx.font = 'bold 10px monospace';
+        ctx.fillText(f.label, x - 8, 12);
+      }
+    });
+  }, [formantValues]);
+  
+  return (
+    <canvas
+      ref={canvasRef}
+      width={300}
+      height={80}
+      className="w-full rounded-lg"
+    />
   );
 }
 
