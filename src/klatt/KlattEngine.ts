@@ -156,10 +156,29 @@ export class KlattEngine {
       this.keyboard[i] = -1;
     }
 
-    // Init formant params
+    // Init formant params with default values
     for (let i = 0; i < NUM_FORMANT_PARAM; i++) {
+      let defaultValue = 0;
+      // Set default formant frequencies and bandwidths
+      if (i === FormantParam.F1) defaultValue = 500;
+      else if (i === FormantParam.F2) defaultValue = 1500;
+      else if (i === FormantParam.F3) defaultValue = 2500;
+      else if (i === FormantParam.F4) defaultValue = 3300;
+      else if (i === FormantParam.F5) defaultValue = 3750;
+      else if (i === FormantParam.F6) defaultValue = 4900;
+      else if (i === FormantParam.FNP) defaultValue = 270;
+      else if (i === FormantParam.FNZ) defaultValue = 270;
+      else if (i === FormantParam.B1) defaultValue = 60;
+      else if (i === FormantParam.B2) defaultValue = 90;
+      else if (i === FormantParam.B3) defaultValue = 150;
+      else if (i === FormantParam.B4) defaultValue = 250;
+      else if (i === FormantParam.B5) defaultValue = 200;
+      else if (i === FormantParam.B6) defaultValue = 1000;
+      else if (i === FormantParam.BNP) defaultValue = 50;
+      else if (i === FormantParam.BNZ) defaultValue = 50;
+      
       this.formantParams.push({
-        value: 0,
+        value: defaultValue,
         duration: 0.01,
         t: 0,
         delta: 0,
@@ -253,15 +272,27 @@ export class KlattEngine {
   }
 
   private interp(interp: SignalInterp, value: number, duration: number) {
-    if (duration === 0 || (duration <= 0 && interp.duration === 0)) {
+    if (duration === 0) {
+      // Instant set
       this.interpSet(interp, value);
       return;
-    } else if (duration > 0) {
+    } else if (duration < 0) {
+      // Use existing duration
+      if (interp.duration === 0) {
+        // No existing duration, set instantly
+        this.interpSet(interp, value);
+        return;
+      }
+      interp.delta = (value - interp.value) / interp.duration * DELTA_TIME;
+      interp.t = 0;
+      interp.resting = false;
+    } else {
+      // Use new duration
       interp.duration = duration;
+      interp.delta = (value - interp.value) / interp.duration * DELTA_TIME;
+      interp.t = 0;
+      interp.resting = false;
     }
-    interp.delta = (value - interp.value) / interp.duration * DELTA_TIME;
-    interp.t = 0;
-    interp.resting = false;
   }
 
   private enqueueDelInterp(param: FormantParam, delay: number, value: number, duration: number) {
@@ -684,7 +715,7 @@ export class KlattEngine {
     this.sustain = value;
   }
 
-  // Direct phoneme trigger for UI
+  // Direct phoneme trigger for UI - queues CV pair for processing by noteOn
   triggerPhoneme(consonant: number, vowel: number) {
     const cv = (consonant << 3) | vowel;
     if (this.cvQueueSize >= CV_QUEUE_CAP) return;
@@ -692,23 +723,10 @@ export class KlattEngine {
     this.cvQueue[this.cvQueueRear] = cv;
     this.cvQueueSize++;
 
-    // Process the phoneme directly (no voice accounting)
-    if (this.voiceMode === VoicingMode.MONOVOICE) {
-      // Set default F0 and A0 if not already set
-      if (this.voiceResting(0.05)) {
-        this.interpSet(this.formantParams[FormantParam.F0], 60);
-        this.interpSet(this.formantParams[FormantParam.A0], 100);
-      }
-
-      let currCV: number;
-      if (this.cvQueueSize > 0) {
-        currCV = this.cvQueue[this.cvQueueFront];
-        this.cvQueueFront = (this.cvQueueFront + 1) % CV_QUEUE_CAP;
-        this.cvQueueSize--;
-      } else {
-        currCV = this.cvQueue[this.cvQueueFront ? this.cvQueueFront : CV_QUEUE_CAP - 1];
-      }
-      this.processCV(currCV);
+    // Set default F0 and A0 if voice is resting (for UI button clicks)
+    if (this.voiceMode === VoicingMode.MONOVOICE && this.voiceResting(0.05)) {
+      this.interpSet(this.formantParams[FormantParam.F0], 60);
+      this.interpSet(this.formantParams[FormantParam.A0], 100);
     }
   }
 

@@ -262,6 +262,7 @@ function App() {
       const note = keyMap[e.key.toLowerCase()];
       if (note !== undefined && engineRef.current) {
         if (modeRef.current === VoicingMode.MONOVOICE) {
+          // Queue the CV pair before noteOn so it gets processed
           engineRef.current.triggerPhoneme(selectedConsonantRef.current, selectedVowelRef.current);
         }
         engineRef.current.noteOn(note, 100);
@@ -315,7 +316,23 @@ function App() {
   // Consonant/Vowel trigger
   const triggerCV = () => {
     if (!engineRef.current) return;
+    // Queue the CV pair
     engineRef.current.triggerPhoneme(selectedConsonant, selectedVowel);
+    // Trigger note with middle C for voice accounting
+    const note = 60;
+    engineRef.current.noteOn(note, 100);
+    setActiveNotes(prev => new Set(prev).add(note));
+    // Release after a short time
+    setTimeout(() => {
+      if (engineRef.current) {
+        engineRef.current.noteOff(note);
+        setActiveNotes(prev => {
+          const next = new Set(prev);
+          next.delete(note);
+          return next;
+        });
+      }
+    }, 200);
   };
 
   // Consonants and vowels for UI
@@ -565,7 +582,23 @@ function App() {
                         setSelectedConsonant(syl.cons);
                         setSelectedVowel(syl.vowel);
                         if (engineRef.current) {
+                          // Queue the CV pair
                           engineRef.current.triggerPhoneme(syl.cons, syl.vowel);
+                          // Trigger note with middle C for voice accounting
+                          const note = 60;
+                          engineRef.current.noteOn(note, 100);
+                          setActiveNotes(prev => new Set(prev).add(note));
+                          // Release after a short time
+                          setTimeout(() => {
+                            if (engineRef.current) {
+                              engineRef.current.noteOff(note);
+                              setActiveNotes(prev => {
+                                const next = new Set(prev);
+                                next.delete(note);
+                                return next;
+                              });
+                            }
+                          }, 200);
                         }
                       }}
                       className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-300 transition-all"
