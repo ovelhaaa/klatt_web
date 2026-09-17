@@ -458,16 +458,22 @@ export class KlattEngine {
 
   // Generate audio samples
   processSamples(buffer: Float32Array, numSamples: number) {
-    const masterInc = (this.masterVolumeKnob - this.masterVolume) * 0.0625;
-    const waveshapeInc = (this.waveshapperKnob - this.waveshapper) * 0.0625;
-    const pResonFInc = (this.pResonFKnob - this.pResonF) * 0.0625;
-    const pResonBWInc = (this.pResonBWKnob - this.pResonBW) * 0.0625;
-    const pResonWetInc = (this.pResonWetKnob - this.pResonWet) * 0.0625;
-    const pAResonFInc = (this.pAResonFKnob - this.pAResonF) * 0.0625;
-    const pAResonBWInc = (this.pAResonBWKnob - this.pAResonBW) * 0.0625;
-    const pAResonWetInc = (this.pAResonWetKnob - this.pAResonWet) * 0.0625;
+    // Smoothing factor for parameter changes (1/16 = 0.0625)
+    const smoothFactor = 0.0625;
+    const masterInc = (this.masterVolumeKnob - this.masterVolume) * smoothFactor;
+    const waveshapeInc = (this.waveshapperKnob - this.waveshapper) * smoothFactor;
+    const pResonFInc = (this.pResonFKnob - this.pResonF) * smoothFactor;
+    const pResonBWInc = (this.pResonBWKnob - this.pResonBW) * smoothFactor;
+    const pResonWetInc = (this.pResonWetKnob - this.pResonWet) * smoothFactor;
+    const pAResonFInc = (this.pAResonFKnob - this.pAResonF) * smoothFactor;
+    const pAResonBWInc = (this.pAResonBWKnob - this.pAResonBW) * smoothFactor;
+    const pAResonWetInc = (this.pAResonWetKnob - this.pAResonWet) * smoothFactor;
+
+    // Pre-calculate pitch bend multiplier
+    const pitchBendMult = this.pitchbendTable[this.pitchbend >> 4];
 
     for (let i = 0; i < numSamples; i++) {
+      // Smooth parameter changes
       this.masterVolume += masterInc;
       this.waveshapper += waveshapeInc;
 
@@ -484,13 +490,16 @@ export class KlattEngine {
         for (let v = 0; v < 16; v++) {
           const voice = this.voices[v];
           if (voice.active !== VoiceState.INACTIVE) {
-            voice.frequency = this.mtoinc[voice.note] * this.pitchbendTable[this.pitchbend >> 4];
+            // Use pre-calculated pitch bend multiplier
+            voice.frequency = this.mtoinc[voice.note] * pitchBendMult;
             voice.phase1 += voice.frequency;
             if (voice.phase1 >= 1.0) voice.phase1 -= 1.0;
 
             let sig = this.sinTable(voice.phase1);
+            // Waveshaping with soft clipping
             sig = (sig > this.waveshapper) ? (sig - this.waveshapper) / (1.0 - this.waveshapper) : 0;
 
+            // Mix voice output with volume and velocity scaling
             out += sig * voice.volume * voice.velocity * 0.0009765625 * this.masterVolume;
 
             // Envelope
@@ -541,12 +550,12 @@ export class KlattEngine {
           }
         }
 
-        // Calculate fundamental frequency
+        // Calculate fundamental frequency with linear interpolation
         const midiPitch = Math.floor(this.formantParams[FormantParam.F0].value);
         const clampedPitch = Math.max(0, Math.min(126, midiPitch));
         const midiMix = this.formantParams[FormantParam.F0].value - midiPitch;
         let frequency = ((1.0 - midiMix) * this.mtoinc[clampedPitch] + midiMix * this.mtoinc[clampedPitch + 1])
-          * this.pitchbendTable[this.pitchbend >> 4];
+          * pitchBendMult;
 
         // Flutter
         this.flutterp1 += this.flutterf1;
@@ -733,15 +742,68 @@ export class KlattEngine {
   // Get formant params for visualization
   getFormantValues() {
     return {
+      F0: this.formantParams[FormantParam.F0].value,
       F1: this.formantParams[FormantParam.F1].value,
       F2: this.formantParams[FormantParam.F2].value,
       F3: this.formantParams[FormantParam.F3].value,
+      F4: this.formantParams[FormantParam.F4].value,
+      F5: this.formantParams[FormantParam.F5].value,
       FNP: this.formantParams[FormantParam.FNP].value,
       FNZ: this.formantParams[FormantParam.FNZ].value,
+      B1: this.formantParams[FormantParam.B1].value,
+      B2: this.formantParams[FormantParam.B2].value,
+      B3: this.formantParams[FormantParam.B3].value,
       AV: this.formantParams[FormantParam.AV].value,
       AVS: this.formantParams[FormantParam.AVS].value,
       AF: this.formantParams[FormantParam.AF].value,
       AH: this.formantParams[FormantParam.AH].value,
+      A0: this.formantParams[FormantParam.A0].value,
     };
+  }
+
+  // Apply preset parameters
+  applyPreset(params: {
+    masterVolume?: number;
+    waveshape?: number;
+    flutter?: number;
+    attack?: number;
+    release?: number;
+    sustain?: number;
+    resonFreq?: number;
+    resonBW?: number;
+    resonWet?: number;
+    antiResonFreq?: number;
+    antiResonBW?: number;
+    antiResonWet?: number;
+  }) {
+    if (params.masterVolume !== undefined) this.setMasterVolume(params.masterVolume / 100);
+    if (params.waveshape !== undefined) this.setWaveshapper(params.waveshape / 100);
+    if (params.flutter !== undefined) this.setFlutter(params.flutter / 100);
+    if (params.attack !== undefined) this.setAttack(0.01 + params.attack / 1000);
+    if (params.release !== undefined) this.setRelease(0.01 + params.release / 1000);
+    if (params.sustain !== undefined) this.setSustain(params.sustain / 100);
+    if (params.resonFreq !== undefined) this.setResonatorFreq(params.resonFreq / 100 * 3000);
+    if (params.resonBW !== undefined) this.setResonatorBW(params.resonBW / 100 * 5000 + 1);
+    if (params.resonWet !== undefined) this.setResonatorWet(params.resonWet / 100);
+    if (params.antiResonFreq !== undefined) this.setAntiResonatorFreq(params.antiResonFreq / 100 * 3000);
+    if (params.antiResonBW !== undefined) this.setAntiResonatorBW(params.antiResonBW / 100 * 5000 + 1);
+    if (params.antiResonWet !== undefined) this.setAntiResonatorWet(params.antiResonWet / 100);
+  }
+
+  // Reset all parameters to defaults
+  reset() {
+    this.masterVolumeKnob = 0.8;
+    this.waveshapperKnob = 0.9;
+    this.flutter = 0.1;
+    this.attack = 0.05;
+    this.release = 0.1;
+    this.sustain = 1.0;
+    // Match UI scale: 17/100 * 3000 = 510, 20/100 * 5000 + 1 = 1001
+    this.pResonFKnob = 510;
+    this.pResonBWKnob = 1001;
+    this.pResonWetKnob = 0;
+    this.pAResonFKnob = 510;
+    this.pAResonBWKnob = 1001;
+    this.pAResonWetKnob = 0;
   }
 }
